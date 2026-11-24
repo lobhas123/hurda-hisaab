@@ -11,7 +11,7 @@
 
   const STORAGE_KEY = 'hurda-hisaab-v1';
   const SESSION_KEY = 'hurda-hisaab-unlocked';
-  const APP_VERSION = '1.1.0';
+  const APP_VERSION = '1.2.0';
 
   const EMOJIS = ['🌾', '🥜', '🫘', '🧂', '🍯', '🍪', '🧺', '📦'];
 

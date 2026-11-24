@@ -2,7 +2,7 @@
  * Hurda Hisaab service worker.
  * Network-first so updates arrive immediately, with an offline cache fallback.
  */
-const CACHE_NAME = 'hurda-hisaab-v3';
+const CACHE_NAME = 'hurda-hisaab-v4';
 const APP_SHELL = [
   './',
   './index.html',
