@@ -1644,7 +1644,8 @@
   function qtyChips(unit, mode) {
     let values;
     if (mode === 'amount') values = [10, 20, 50, 100];
-    else if (unit === 'kg' || unit === 'litre') values = [1, 2, 5, 10];
+    else if (unit === 'kg') values = [0.25, 0.5, 1, 2, 5, 10];
+    else if (unit === 'litre') values = [0.5, 1, 2, 5, 10];
     else if (unit === 'g') values = [100, 250, 500, 1000];
     else values = [1, 2, 5, 10];
     return values
@@ -3674,6 +3675,168 @@
   }
 
   // ---------------------------------------------------------------------
+  // Cloud sync  — shared real-time data between all devices
+  // ---------------------------------------------------------------------
+
+  const SYNC_POLL_MS = 5000; // poll every 5 seconds
+  let cloudEnabled = false;  // true once /api/state responds OK
+  let cloudVersion = 0;      // last known server version
+  let syncTimer = null;
+  let syncBusy = false;
+
+  // Track transaction IDs deleted locally so the server can remove them too
+  let deletedTxnIds = (function () {
+    try { return JSON.parse(localStorage.getItem('hurda-deleted-ids') || '[]'); }
+    catch (e) { return []; }
+  })();
+
+  function saveDeletedIds() {
+    try { localStorage.setItem('hurda-deleted-ids', JSON.stringify(deletedTxnIds)); }
+    catch (e) { /* ignore */ }
+  }
+
+  function trackDeleted(txnId) {
+    if (txnId && !deletedTxnIds.includes(txnId)) {
+      deletedTxnIds.push(txnId);
+      saveDeletedIds();
+    }
+  }
+
+  // Status dot: 'synced' | 'syncing' | 'error' | 'offline' | 'off'
+  function setSyncStatus(status) {
+    var el = document.getElementById('sync-status');
+    if (!el) return;
+    el.className = 'sync-status sync-' + status;
+    var titles = {
+      synced: '✓ Synced',
+      syncing: 'Syncing…',
+      error: 'Sync failed — will retry',
+      offline: 'Offline',
+      off: '',
+    };
+    el.title = titles[status] || '';
+  }
+
+  function hasOpenSheet() {
+    return !!document.querySelector('#sheet-root .sheet-layer');
+  }
+
+  // Apply an incoming server state: update local store + render if safe
+  function applyServerState(incoming) {
+    if (!incoming || typeof incoming !== 'object') return;
+    // Merge server-side deletedIds into our local tracking
+    var srvDeleted = Array.isArray(incoming._deletedIds) ? incoming._deletedIds : [];
+    srvDeleted.forEach(function (id) {
+      if (!deletedTxnIds.includes(id)) deletedTxnIds.push(id);
+    });
+    if (srvDeleted.length) saveDeletedIds();
+
+    // Strip the internal field before giving to the app
+    var clean = Store.clone(incoming);
+    delete clean._deletedIds;
+
+    // Check whether anything actually changed
+    var localIds = new Set(state.transactions.map(function (t) { return t.id; }));
+    var hasNew = clean.transactions.some(function (t) { return !localIds.has(t.id); });
+    var serverDeletedLocal = srvDeleted.some(function (id) { return localIds.has(id); });
+
+    if (!hasNew && !serverDeletedLocal) return; // nothing new
+
+    state = clean;
+    persistState(state, false); // save to localStorage only (no re-sync)
+
+    if (!hasOpenSheet()) {
+      render();
+      toast('Updated with new data 🔄');
+    }
+    // If a sheet is open: state is updated silently; render() runs on closeSheet
+  }
+
+  // POST local state to server and receive the merged state back
+  async function pushToServer(stateToSync) {
+    if (!cloudEnabled) return;
+    setSyncStatus('syncing');
+    try {
+      var payload = Store.clone(stateToSync);
+      payload._deletedIds = deletedTxnIds;
+      var res = await fetch('/api/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ state: payload }),
+      });
+      if (!res.ok) { setSyncStatus('error'); return; }
+      var data = await res.json();
+      cloudVersion = data.version;
+      applyServerState(data.state);
+      setSyncStatus('synced');
+    } catch (e) {
+      setSyncStatus(navigator.onLine ? 'error' : 'offline');
+    }
+  }
+
+  // GET current server state; apply if newer
+  async function pollServer() {
+    if (!cloudEnabled || syncBusy) return;
+    syncBusy = true;
+    try {
+      var res = await fetch('/api/state?v=' + cloudVersion);
+      if (!res.ok) { setSyncStatus('error'); syncBusy = false; return; }
+      var data = await res.json();
+      if (data.version !== cloudVersion) {
+        cloudVersion = data.version;
+        applyServerState(data.state);
+      }
+      setSyncStatus('synced');
+    } catch (e) {
+      setSyncStatus(navigator.onLine ? 'error' : 'offline');
+    }
+    syncBusy = false;
+  }
+
+  // Probe once to see if the sync API is available, then start polling
+  async function initCloudSync() {
+    try {
+      var res = await fetch('/api/state', { method: 'HEAD' });
+      cloudEnabled = res.ok;
+    } catch (e) {
+      cloudEnabled = false;
+    }
+    if (!cloudEnabled) { setSyncStatus('off'); return; }
+
+    // Initial push seeds the server if it has no data yet, and pulls if it does
+    await pushToServer(state);
+    syncTimer = setInterval(pollServer, SYNC_POLL_MS);
+  }
+
+  // -----------------------------------------------------------------------
+  // Wrap persistState so every save also syncs to the server.
+  // The original function is redefined below; calls with sync=false skip push.
+  // -----------------------------------------------------------------------
+  var _persistStateOrig = persistState;
+  persistState = function (next, shouldSync) {
+    _persistStateOrig(next);
+    if (shouldSync !== false) pushToServer(next || state);
+  };
+
+  // -----------------------------------------------------------------------
+  // Wrap deleteTxn so we can track the deleted ID before it's removed
+  // -----------------------------------------------------------------------
+  var _deleteTxnOrig = deleteTxn;
+  deleteTxn = function (txnId) {
+    // Track the ID before the confirmation/deletion
+    var origOnConfirm = null;
+    // We monkey-patch by pre-registering the ID; the original fn handles the rest
+    trackDeleted(txnId);
+    _deleteTxnOrig(txnId);
+  };
+
+  // Start sync after first render
+  function startSync() {
+    if (typeof fetch === 'undefined') return; // very old browsers
+    initCloudSync();
+  }
+
+  // ---------------------------------------------------------------------
   // Start
   // ---------------------------------------------------------------------
 
@@ -3711,6 +3874,7 @@
     }
 
     render();
+    startSync();
   }
 
   init();

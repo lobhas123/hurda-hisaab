@@ -24,6 +24,30 @@
   color-scheme: light;
 }
 
+/* Sync status dot — fixed bottom-right corner */
+.sync-status {
+  position: fixed;
+  bottom: 76px; /* sits just above the bottom nav */
+  right: 14px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  z-index: 999;
+  transition: background 0.4s, opacity 0.4s;
+  pointer-events: none;
+  opacity: 0;
+}
+.sync-status.sync-synced  { background: #22c55e; opacity: 1; }
+.sync-status.sync-syncing { background: #f59e0b; opacity: 1; animation: sync-pulse 1s ease-in-out infinite; }
+.sync-status.sync-error   { background: #ef4444; opacity: 1; }
+.sync-status.sync-offline { background: #94a3b8; opacity: 1; }
+.sync-status.sync-off     { opacity: 0; }
+
+@keyframes sync-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+
 * {
   box-sizing: border-box;
   -webkit-tap-highlight-color: transparent;

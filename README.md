@@ -57,7 +57,58 @@ HTTP/HTTPS.
 When opened from the home screen it runs full screen. The app also offers
 **Settings → Install app** with device-specific instructions.
 
-## Host it online (recommended for daily use)
+## Shared cloud sync (both parents, same data)
+
+The app now has **real-time shared sync** built into `server.js`. When two
+phones connect to the same running server, they see the same data within
+5 seconds of each other.
+
+### How it works
+
+- Every time you record a sale or stock entry, your phone pushes the change
+  to the server immediately.
+- Every 5 seconds each phone checks for new data from the server.
+- If Mom records a sale while Dad is offline, her entry is waiting on the
+  server when Dad's phone comes back online.
+- A small dot at the bottom-right corner shows the sync status:
+  - 🟢 green = synced
+  - 🟡 yellow (pulsing) = syncing
+  - 🔴 red = error (will retry)
+
+### Run the server at home (same Wi-Fi)
+
+1. Double-click **`start.bat`** on your computer.
+2. The console shows a **Phone (same Wi-Fi)** address like `http://192.168.1.10:4173`.
+3. Open that address on **both phones** and install the app from the browser menu.
+4. Keep the computer running. Both phones now share data in real time.
+
+> **Keep the computer on** while the shop is running. When the computer is off
+> both phones still work (using their local copy from the last sync), but
+> changes won't reach each other until the server is back up.
+
+### Host on a server for always-on sync
+
+For the app to stay in sync without keeping your computer on, you need a server
+that runs 24/7. Options (all free for small traffic):
+
+**Railway** (easiest, Node.js supported):
+1. Sign up at <https://railway.app>.
+2. Connect your GitHub repo (or upload the folder).
+3. Railway auto-runs `node server.js` and gives you a `https://…railway.app` link.
+4. Open that link on both phones and install.
+
+**Render**:
+1. Sign up at <https://render.com>.
+2. New → Web Service → connect repo → start command: `node server.js`.
+3. Free plan works fine.
+
+**Fly.io** or **Heroku** also work the same way.
+
+> ⚠️ **Data lives on the server** — when the server restarts on a free host,
+> `data/state.json` may be deleted (ephemeral storage). Download a backup from
+> Settings regularly, or upgrade to a paid plan with persistent disks.
+
+## Host it online — static only (one device, no sync)
 
 The easiest free option is **Netlify Drop**:
 
@@ -66,9 +117,9 @@ The easiest free option is **Netlify Drop**:
 3. Netlify gives you a secure `https://…netlify.app` link.
 4. Open that link on the shop phone and install it from the browser menu.
 
-Other static hosts such as Cloudflare Pages, GitHub Pages or Vercel work the
-same way. No build step is required — upload the folder as-is. The app needs no
-backend.
+> On static hosts (Netlify, GitHub Pages, Cloudflare Pages) the `/api/sync`
+> endpoint is not available, so each device keeps its own separate data.
+> Use Backup → Restore to move data between devices manually.
 
 After the first online load, the app shell is cached and works offline. Data is
 stored in the browser on that one device.
@@ -88,8 +139,8 @@ stored in the browser on that one device.
   reopen the app, and restore your latest backup; the restored app opens
   without a PIN.
 
-The app works best with **one shop phone/tablet**. Each device keeps its own
-separate data; there is no cloud sync.
+The app works best with **one shop phone/tablet** per server. Each device
+shares the same data via the server in real time.
 
 ## Daily use in 30 seconds
 
@@ -123,7 +174,8 @@ node --check server.js
 | `js/app.js` | Screens, sheets, forms, lock screen |
 | `sw.js` | Offline cache |
 | `manifest.webmanifest` | Installable app metadata |
-| `server.js` | Zero-dependency local static server |
+| `server.js` | Local static server + shared sync API (`/api/sync`) |
+| `data/state.json` | Shared state file (created automatically on first use) |
 | `start.bat` | Windows one-click launcher |
 | `test/store.test.js` | Data-layer tests |
 | `test/i18n.test.js` | Localization and shell integration tests |
